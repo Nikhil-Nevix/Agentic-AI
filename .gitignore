@@ -3,11 +3,3 @@ backend/venv_clean/
 venv/
 .venv/
 backend/backend/data/faiss_index/
-backend/backend/data/faiss_index/
-backend/backend/data/faiss_index/
-backend/backend/data/faiss_index/
-backend/backend/data/faiss_index/
-frontend/.env 
-backend/
-backend/venv_clean/
-backend/backend/data/faiss_index/
