@@ -1,0 +1,13 @@
+[phases.setup]
+nixPkgs = ["python312"]
+
+[phases.install]
+cmds = [
+    "cd backend",
+    "pip install --no-cache-dir -r requirements.txt",
+    "find /opt/venv -type d -name '__pycache__' -exec rm -rf {} +",
+    "find /opt/venv -type f -name '*.pyc' -delete"
+]
+
+[start]
+cmd = "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"
