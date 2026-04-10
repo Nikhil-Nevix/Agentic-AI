@@ -24,7 +24,7 @@ langchain-google-genai==1.0.6
 langsmith==0.1.82
 
 # Vector Store
-faiss-cpu==1.7.4
+faiss-cpu==1.13.2
 sentence-transformers==3.0.1
 numpy<2  # FAISS 1.7.4 requires NumPy 1.x
 
