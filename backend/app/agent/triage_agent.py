@@ -4,6 +4,8 @@ Main LangChain ReAct agent that triages IT support tickets using RAG and SOP ret
 """
 
 import json
+import re
+import time
 from typing import Dict, Any, Optional, List, Tuple
 from enum import Enum
 
@@ -89,7 +91,7 @@ class TicketTriagingAgent:
         self,
         llm_provider: Optional[str] = None,
         temperature: float = 0.1,
-        max_retries: int = 2
+        max_retries: int = 1
     ):
         """
         Initialize triaging agent.
@@ -124,8 +126,11 @@ class TicketTriagingAgent:
             )
         elif self.llm_provider == "groq":
             from langchain_groq import ChatGroq
+            groq_model = settings.groq_model
+            if groq_model == "llama-3.1-8b-instant":
+                groq_model = "llama-3.3-70b-versatile"
             return ChatGroq(
-                model=settings.groq_model,
+                model=groq_model,
                 temperature=self.temperature,
                 groq_api_key=settings.groq_api_key,
             )
@@ -232,31 +237,87 @@ class TicketTriagingAgent:
         Returns:
             Tuple of (parsed_dict, error_message)
         """
+        text = str(response_text or "").strip()
+        if not text:
+            return None, "Empty model response"
+
+        # 1) Direct JSON parse if entire output is JSON.
         try:
-            # Try to find JSON in response
-            # Look for {...} pattern
-            start = response_text.find('{')
-            end = response_text.rfind('}')
-            
-            if start == -1 or end == -1:
-                return None, "No JSON object found in response"
-            
-            json_str = response_text[start:end+1]
-            parsed = json.loads(json_str)
-            
-            return parsed, None
-            
+            parsed_direct = json.loads(text)
+            if isinstance(parsed_direct, dict):
+                return parsed_direct, None
+        except Exception:
+            pass
+
+        # 2) Parse fenced JSON blocks first (```json ... ``` or ``` ... ```).
+        fenced_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+        for block in fenced_blocks:
+            block_text = block.strip()
+            if not block_text:
+                continue
+            try:
+                parsed_block = json.loads(block_text)
+                if isinstance(parsed_block, dict):
+                    return parsed_block, None
+            except Exception:
+                continue
+
+        # 3) Fallback to first '{' ... last '}' extraction.
+        start = text.find('{')
+        end = text.rfind('}')
+        if start == -1 or end == -1 or end <= start:
+            return None, "No JSON object found in response"
+
+        try:
+            candidate = text[start:end + 1]
+            parsed_candidate = json.loads(candidate)
+            if isinstance(parsed_candidate, dict):
+                return parsed_candidate, None
+            return None, "Parsed JSON was not an object"
         except json.JSONDecodeError as e:
             return None, f"Invalid JSON: {str(e)}"
         except Exception as e:
             return None, f"Parse error: {str(e)}"
+
+    def _extract_retry_seconds(self, message: str) -> Optional[float]:
+        """Extract retry-after hint from provider error message when available."""
+        match = re.search(r"try again in\s+([0-9]+(?:\.[0-9]+)?)s", message, flags=re.IGNORECASE)
+        if not match:
+            return None
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+
+    def _normalize_confidence(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
+        """Coerce confidence labels (high|medium|low) into numeric scores for routing logic."""
+        confidence = parsed.get("confidence")
+        if isinstance(confidence, str):
+            label = confidence.strip().lower()
+            mapping = {
+                "high": 0.90,
+                "medium": 0.72,
+                "low": 0.45,
+            }
+            if label in mapping:
+                parsed["confidence"] = mapping[label]
+                return parsed
+
+            # Handle accidental percentage or numeric strings from model output.
+            try:
+                numeric_value = float(label.replace("%", ""))
+                parsed["confidence"] = numeric_value / 100.0 if numeric_value > 1.0 else numeric_value
+            except ValueError:
+                pass
+        return parsed
     
     def triage(
         self,
         subject: str,
         description: str,
-        max_iterations: int = 10,
-        verbose: bool = False
+        max_iterations: int = 4,
+        verbose: bool = False,
+        allow_fallback: bool = True,
     ) -> TriageResult:
         """
         Triage a support ticket.
@@ -349,6 +410,7 @@ Thought: {agent_scratchpad}"""
                         )
                 
                 # Validate response
+                parsed = self._normalize_confidence(parsed)
                 validation_errors = self._validate_response(parsed)
                 
                 if validation_errors:
@@ -384,7 +446,39 @@ Thought: {agent_scratchpad}"""
                 
             except Exception as e:
                 logger.error(f"Agent error on attempt {attempt + 1}: {e}")
+                error_text = str(e)
+                is_rate_limit = any(token in error_text.lower() for token in ["rate limit", "429", "tokens per minute", "rate_limit_exceeded"])
+                if is_rate_limit and attempt < self.max_retries:
+                    retry_after = self._extract_retry_seconds(error_text)
+                    sleep_seconds = max(2.0, min(20.0, retry_after if retry_after is not None else 8.0))
+                    logger.warning(f"Rate limit encountered. Retrying after {sleep_seconds:.2f}s")
+                    time.sleep(sleep_seconds)
+                    continue
                 if attempt == self.max_retries:
+                    if (
+                        allow_fallback
+                        and self.llm_provider == "groq"
+                        and is_rate_limit
+                        and settings.google_api_key
+                    ):
+                        logger.warning(
+                            "Groq rate limit persisted after retries. Falling back to Gemini provider."
+                        )
+                        try:
+                            fallback_agent = TicketTriagingAgent(
+                                llm_provider="gemini",
+                                temperature=self.temperature,
+                                max_retries=0,
+                            )
+                            return fallback_agent.triage(
+                                subject=subject,
+                                description=description,
+                                max_iterations=max_iterations,
+                                verbose=verbose,
+                                allow_fallback=False,
+                            )
+                        except Exception as fallback_exc:
+                            logger.error(f"Gemini fallback failed: {fallback_exc}")
                     return self._create_error_result(
                         subject,
                         description,

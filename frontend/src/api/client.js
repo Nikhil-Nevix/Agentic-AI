@@ -75,6 +75,13 @@ export const getTickets = async ({ page = 1, limit = 20, queue = '', category = 
   return response.data
 }
 
+export const getQueueAnalytics = async ({ startDate, endDate }) => {
+  const response = await api.get('/api/v1/queues/analytics', {
+    params: { start_date: startDate, end_date: endDate },
+  })
+  return response.data
+}
+
 export const signupUser = async ({ email, password, full_name = null, role = 'Service Desk User' }) => {
   const response = await api.post('/api/v1/auth/signup', {
     email,
@@ -89,6 +96,24 @@ export const loginUser = async ({ email, password }) => {
   const response = await api.post('/api/v1/auth/login', {
     email,
     password,
+  })
+  return response.data
+}
+
+export const sendChatbotMessage = async ({ userId, sessionId = 'portal', message, action }) => {
+  const response = await api.post('/api/v1/chatbot/message', {
+    user_id: userId,
+    session_id: sessionId,
+    message,
+    action,
+  })
+  return response.data
+}
+
+export const clearChatbotHistory = async ({ userId, sessionId = 'portal' }) => {
+  const response = await api.post('/api/v1/chatbot/history/clear', {
+    user_id: userId,
+    session_id: sessionId,
   })
   return response.data
 }

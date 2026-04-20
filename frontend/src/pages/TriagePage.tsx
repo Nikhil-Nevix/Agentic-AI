@@ -239,9 +239,9 @@ export const TriagePage = ({ onTriageSaved }: TriagePageProps) => {
           <>
             <TriageResultCard
               result={result}
-              onAccept={() => setActionMessage('Ticket accepted and ready to close.')}
-              onOverride={() => setActionMessage('Queue override flow initiated.')}
-              onEscalate={() => setActionMessage('Escalation submitted to human triage desk.')}
+              onAccept={() => setActionMessage('Feature coming soon.')}
+              onOverride={() => setActionMessage('AI-generated solution is now visible below.')}
+              onEscalate={() => setActionMessage('Feature coming soon.')}
             />
             {actionMessage && (
               <div className="rounded-lg border border-brand-jade/30 bg-brand-jade-muted px-4 py-2 text-sm text-brand-jade dark:bg-brand-jade/15 dark:text-brand-jade-light">

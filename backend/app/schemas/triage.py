@@ -317,6 +317,64 @@ class StatsResponse(BaseModel):
     )
 
 
+class QueueAnalyticsItemResponse(BaseModel):
+    """Queue analytics item with KPI values and trend data."""
+
+    name: str = Field(..., description="Queue display name")
+    ticket_count: int = Field(..., ge=0, description="Ticket volume in selected range")
+    avg_confidence: float = Field(..., ge=0.0, le=1.0, description="Average confidence in selected range")
+    top_category: str = Field(..., description="Top category for selected range")
+    trend: List[int] = Field(default_factory=list, description="Per-day ticket volume trend values")
+
+
+class QueueAnalyticsResponse(BaseModel):
+    """Queue analytics payload for queue page date range filtering."""
+
+    start_date: str = Field(..., description="Start date (YYYY-MM-DD)")
+    end_date: str = Field(..., description="End date (YYYY-MM-DD)")
+    labels: List[str] = Field(default_factory=list, description="Per-day labels aligned with trend values")
+    total_open: int = Field(..., ge=0, description="Total tickets in selected range")
+    sla_breached: int = Field(..., ge=0, description="Escalated items in selected range")
+    avg_resolution_hours: float = Field(..., ge=0.0, description="Average processing time in hours")
+    queues: List[QueueAnalyticsItemResponse] = Field(default_factory=list, description="Queue card data")
+
+class WebChatRequest(BaseModel):
+    """Request payload for web chatbot interactions."""
+
+    user_id: str = Field(..., min_length=1, max_length=200, description="Unique user identifier")
+    session_id: str = Field(default="portal", min_length=1, max_length=120, description="Session scope identifier")
+    message: Optional[str] = Field(default=None, max_length=5000, description="Free-text user message")
+    action: Optional[str] = Field(default=None, max_length=120, description="Selected chatbot action")
+
+
+class WebChatOption(BaseModel):
+    """Interactive option returned by chatbot."""
+
+    label: str = Field(..., description="Option text for the UI")
+    action: str = Field(..., description="Action value to send back on click")
+
+
+class WebChatResponse(BaseModel):
+    """Normalized chatbot response for frontend widget."""
+
+    message: str = Field(..., description="Bot response message")
+    options: List[WebChatOption] = Field(default_factory=list, description="Clickable response options")
+
+
+class WebChatHistoryClearRequest(BaseModel):
+    """Request payload to clear web chatbot conversation history."""
+
+    user_id: str = Field(..., min_length=1, max_length=200, description="Unique user identifier")
+    session_id: str = Field(default="portal", min_length=1, max_length=120, description="Session scope identifier")
+
+
+class WebChatHistoryClearResponse(BaseModel):
+    """Response payload for history clear operation."""
+
+    status: str = Field(..., description="Operation status")
+    deleted_count: int = Field(..., ge=0, description="Number of deleted conversation records")
+
+
 __all__ = [
     'TriageRequest',
     'TriageResponse',
@@ -328,6 +386,13 @@ __all__ = [
     'ErrorResponse',
     'QueuesResponse',
     'StatsResponse',
+    'QueueAnalyticsItemResponse',
+    'QueueAnalyticsResponse',
+    'WebChatRequest',
+    'WebChatOption',
+    'WebChatResponse',
+    'WebChatHistoryClearRequest',
+    'WebChatHistoryClearResponse',
     'RoutingActionEnum',
     'TriageJobStatusEnum'
 ]

@@ -32,6 +32,11 @@ from app.models import SOPChunk as SOPChunkModel
 
 class IndexBuilder:
     """Builds FAISS indexes for tickets and SOP chunks."""
+
+    SOP_SOURCE_PDFS = [
+        "data/Common.pdf",
+        "data/Common_Outlook.pdf",
+    ]
     
     def __init__(self, rebuild: bool = False):
         """
@@ -109,7 +114,7 @@ class IndexBuilder:
             pdf_path: Path to Common.pdf
             
         Returns:
-            List of SOPChunk objects
+            List of dict entries with SOP chunk and source PDF name
         """
         logger.info(f"Parsing SOP chunks from {pdf_path}")
         
@@ -118,15 +123,24 @@ class IndexBuilder:
         
         parser = SOPParser(pdf_path)
         chunks = parser.parse()
+
+        source_pdf = Path(pdf_path).name
+        chunks_with_source = [
+            {
+                "chunk": chunk,
+                "source_pdf": source_pdf,
+            }
+            for chunk in chunks
+        ]
         
         stats = parser.get_statistics()
         logger.info(f"Extracted {len(chunks)} SOP chunks")
         logger.info(f"Sections: {stats['sections']}")
         logger.info(f"Average length: {stats['avg_content_length']} chars")
         
-        self.stats['sop_chunks_processed'] = len(chunks)
+        self.stats['sop_chunks_processed'] += len(chunks)
         
-        return chunks
+        return chunks_with_source
     
     def build_ticket_index(
         self,
@@ -198,7 +212,7 @@ class IndexBuilder:
         Build FAISS index for SOP chunks.
         
         Args:
-            chunks: List of SOPChunk objects
+            chunks: List of dict entries with keys: chunk, source_pdf
             batch_size: Embedding batch size
             
         Returns:
@@ -210,8 +224,8 @@ class IndexBuilder:
         
         # Extract texts for embedding (title + content)
         texts = [
-            f"{chunk.title}. {chunk.content}"
-            for chunk in chunks
+            f"{entry['chunk'].title}. {entry['chunk'].content}"
+            for entry in chunks
         ]
         logger.info(f"Texts to embed: {len(texts)}")
         
@@ -228,13 +242,15 @@ class IndexBuilder:
         
         # Create metadata
         metadata = []
-        for idx, chunk in enumerate(chunks):
+        for idx, entry in enumerate(chunks):
+            chunk = entry["chunk"]
             metadata.append({
                 'id': idx,
                 'section_num': chunk.section_num,
                 'title': chunk.title,
                 'content': chunk.content,
                 'page_num': chunk.page_num,
+                'source_pdf': entry['source_pdf'],
             })
         
         logger.info(f"Created {len(metadata)} metadata entries")
@@ -252,7 +268,7 @@ class IndexBuilder:
         Save SOP chunks to database for reference.
         
         Args:
-            chunks: List of SOPChunk objects
+            chunks: List of dict entries with keys: chunk, source_pdf
         """
         logger.info("Saving SOP chunks to database...")
         
@@ -262,7 +278,8 @@ class IndexBuilder:
             db.query(SOPChunkModel).delete()
             
             # Insert new chunks
-            for idx, chunk in enumerate(chunks):
+            for idx, entry in enumerate(chunks):
+                chunk = entry["chunk"]
                 db_chunk = SOPChunkModel(
                     section_num=chunk.section_num,
                     title=chunk.title,
@@ -323,17 +340,33 @@ class IndexBuilder:
                 sop_exists = sop_store.load()
                 
                 if ticket_exists and sop_exists:
-                    logger.warning("Indexes already exist!")
-                    logger.info("Use --rebuild to force rebuild")
-                    logger.info(f"Ticket index: {ticket_store.index.ntotal:,} vectors")
-                    logger.info(f"SOP index: {sop_store.index.ntotal} vectors")
-                    return True
+                    required_sources = {Path(path).name for path in self.SOP_SOURCE_PDFS}
+                    indexed_sources = {
+                        str(meta.get("source_pdf"))
+                        for meta in sop_store.metadata
+                        if isinstance(meta, dict) and meta.get("source_pdf")
+                    }
+
+                    if required_sources.issubset(indexed_sources):
+                        logger.warning("Indexes already exist!")
+                        logger.info("Use --rebuild to force rebuild")
+                        logger.info(f"Ticket index: {ticket_store.index.ntotal:,} vectors")
+                        logger.info(f"SOP index: {sop_store.index.ntotal} vectors")
+                        logger.info(f"SOP sources indexed: {sorted(indexed_sources)}")
+                        return True
+
+                    logger.warning(
+                        "Existing SOP index does not contain all required SOP sources. "
+                        "Rebuilding SOP index to include both Common.pdf and Common_Outlook.pdf."
+                    )
             
             # Step 1: Load ticket data
             tickets_df = self.load_tickets("data/Stack_Tickets.xlsx")
             
-            # Step 2: Parse SOP chunks
-            sop_chunks = self.load_sop_chunks("data/Common.pdf")
+            # Step 2: Parse SOP chunks from all SOP source PDFs
+            sop_chunks = []
+            for sop_pdf_path in self.SOP_SOURCE_PDFS:
+                sop_chunks.extend(self.load_sop_chunks(sop_pdf_path))
             
             # Step 3: Build ticket index
             ticket_store = self.build_ticket_index(tickets_df, batch_size=100)

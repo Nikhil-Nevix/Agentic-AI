@@ -20,8 +20,8 @@ class TicketSearchInput(BaseModel):
         description="The ticket description or issue to search for similar past tickets"
     )
     top_k: int = Field(
-        default=5,
-        description="Number of similar tickets to retrieve (default: 5)",
+        default=2,
+        description="Number of similar tickets to retrieve (default: 2)",
         ge=1,
         le=10
     )
@@ -33,8 +33,8 @@ class SOPSearchInput(BaseModel):
         description="The issue or problem to search for relevant SOP procedures"
     )
     top_k: int = Field(
-        default=3,
-        description="Number of SOP procedures to retrieve (default: 3)",
+        default=1,
+        description="Number of SOP procedures to retrieve (default: 1)",
         ge=1,
         le=5
     )
@@ -49,7 +49,7 @@ class TicketRetriever:
         self.store = get_store("tickets")
         logger.info("Ticket retriever initialized")
     
-    def search(self, query: str, top_k: int = 5) -> str:
+    def search(self, query: str, top_k: int = 2) -> str:
         """
         Search for similar tickets.
         
@@ -113,7 +113,7 @@ class SOPRetriever:
         self.store = get_store("sop")
         logger.info("SOP retriever initialized")
     
-    def search(self, query: str, top_k: int = 3) -> str:
+    def search(self, query: str, top_k: int = 1) -> str:
         """
         Search for relevant SOP procedures.
         
@@ -230,7 +230,7 @@ def create_ticket_search_tool() -> Tool:
     
     def search_tickets(query: str) -> str:
         """Search for similar past tickets to help with triaging."""
-        return retriever.search(query, top_k=5)
+        return retriever.search(query, top_k=2)
     
     return Tool(
         name="search_similar_tickets",
@@ -238,7 +238,7 @@ def create_ticket_search_tool() -> Tool:
             "Search for similar past support tickets. "
             "Use this to find how similar issues were categorized and resolved. "
             "Input should be the ticket description or main issue. "
-            "Returns up to 5 similar tickets with their queue, category, and resolution details."
+            "Returns up to 2 similar tickets with their queue, category, and resolution details."
         ),
         func=search_tickets,
     )
@@ -255,7 +255,7 @@ def create_sop_search_tool() -> Tool:
     
     def search_sops(query: str) -> str:
         """Search for relevant Standard Operating Procedures."""
-        return retriever.search(query, top_k=3)
+        return retriever.search(query, top_k=1)
     
     return Tool(
         name="search_sop_procedures",
@@ -263,7 +263,7 @@ def create_sop_search_tool() -> Tool:
             "Search for relevant Standard Operating Procedures (SOPs). "
             "Use this to find official troubleshooting steps and resolution procedures. "
             "Input should be the technical issue or problem type. "
-            "Returns up to 3 most relevant SOP procedures with detailed steps."
+            "Returns the single most relevant SOP procedure with detailed steps."
         ),
         func=search_sops,
     )

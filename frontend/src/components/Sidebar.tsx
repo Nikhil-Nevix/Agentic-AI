@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import type { SidebarNavItem, SidebarProps, SidebarRoute } from '../types'
+import jadeLogo from '../../Jade_logo.png'
 
 const routeIcons: Record<SidebarRoute, ComponentType<{ className?: string }>> = {
   '/dashboard': LayoutDashboard,
@@ -21,7 +22,7 @@ const routeIcons: Record<SidebarRoute, ComponentType<{ className?: string }>> = 
 
 const getNavItems = (queueCount?: number): SidebarNavItem[] => [
   { label: 'Dashboard', route: '/dashboard' },
-  { label: 'Triage', route: '/triage' },
+  { label: 'Triage & AI Solution Provider', route: '/triage' },
   { label: 'Tickets', route: '/tickets' },
   { label: 'Queues', route: '/queues', badgeCount: queueCount },
 ]
@@ -31,9 +32,13 @@ export const Sidebar = ({
   onNavigate,
   queueCount = 0,
   collapsedByDefault = false,
+  showDashboard = true,
 }: SidebarProps) => {
   const [isCollapsed, setIsCollapsed] = useState(collapsedByDefault)
-  const navItems = useMemo(() => getNavItems(queueCount), [queueCount])
+  const navItems = useMemo(
+    () => getNavItems(queueCount).filter((item) => (showDashboard ? true : item.route !== '/dashboard')),
+    [queueCount, showDashboard],
+  )
 
   return (
     <aside
@@ -43,14 +48,13 @@ export const Sidebar = ({
       )}
     >
       <div className="flex h-16 items-center justify-between border-b border-slate-700 px-4 dark:border-slate-700">
-        <div className={cn('flex items-center gap-2', isCollapsed && 'justify-center')}>
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-brand-jade text-sm font-bold text-white">
-            J
-          </span>
-          <div className={cn('transition-all duration-200', isCollapsed && 'hidden')}>
-            <p className="text-sm font-semibold tracking-tight text-white">Jade Global</p>
-            <p className="text-xs text-slate-300">Service Triage</p>
+        <div className={cn('transition-all duration-200', isCollapsed && 'hidden')}>
+          <div className="inline-flex items-center rounded-2xl border border-white/20 bg-white/[0.06] px-4 py-2 backdrop-blur">
+            <img src={jadeLogo} alt="Jade Global logo" className="h-8 w-auto rounded-md object-contain" />
           </div>
+        </div>
+        <div className={cn('flex items-center justify-center', !isCollapsed && 'hidden')}>
+          <img src={jadeLogo} alt="Jade Global logo" className="h-8 w-8 rounded-md object-contain" />
         </div>
         <button
           type="button"

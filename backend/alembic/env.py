@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings
 from app.db.session import Base
-from app.models import Ticket, TriageResult, AuditLog, SOPChunk  # Import all models
+from app.models import Ticket, TriageResult, AuditLog, SOPChunk, ChatConversation  # Import all models
 
 # Alembic Config object
 config = context.config

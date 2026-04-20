@@ -26,6 +26,7 @@ export interface SidebarProps {
   onNavigate: (route: SidebarRoute) => void
   queueCount?: number
   collapsedByDefault?: boolean
+  showDashboard?: boolean
 }
 
 export interface TopbarNotification {
@@ -151,4 +152,22 @@ export interface QueueCardData {
   avgConfidence: number
   topCategory: string
   trend: number[]
+}
+
+export interface QueueAnalyticsApiItem {
+  name: string
+  ticket_count: number
+  avg_confidence: number
+  top_category: string
+  trend: number[]
+}
+
+export interface QueueAnalyticsApiResponse {
+  start_date: string
+  end_date: string
+  labels: string[]
+  total_open: number
+  sla_breached: number
+  avg_resolution_hours: number
+  queues: QueueAnalyticsApiItem[]
 }

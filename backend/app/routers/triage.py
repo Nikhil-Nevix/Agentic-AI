@@ -19,15 +19,26 @@ from app.schemas.triage import (
     HealthResponse,
     ErrorResponse,
     QueuesResponse,
-    StatsResponse
+    StatsResponse,
+    QueueAnalyticsResponse,
+    QueueAnalyticsItemResponse,
+    RoutingActionEnum,
+    WebChatRequest,
+    WebChatResponse,
+    WebChatHistoryClearRequest,
+    WebChatHistoryClearResponse,
 )
 from app.agent.triage_agent import triage_ticket, get_triage_agent
 from app.agent.prompts import VALIDATION_RULES
 from app.config import settings
 from app.db.session import SessionLocal
 from app.models import Ticket as TicketModel, TriageResult as TriageResultModel
+from app.services.triage_service import triage_ticket_sync
+from app.services.google_chat_service import process_web_chat_event, clear_web_chat_history
 from datetime import datetime
 from typing import Optional, Dict
+from datetime import timedelta, date
+from sqlalchemy import func, and_
 
 router = APIRouter(
     prefix="/api/v1",
@@ -55,6 +66,15 @@ class TriageJob:
 TRIAGE_JOBS: Dict[str, TriageJob] = {}
 
 
+def _map_persisted_routing_to_response(value: str) -> RoutingActionEnum:
+    mapping = {
+        "auto_resolve": RoutingActionEnum.AUTO_RESOLVE,
+        "suggest": RoutingActionEnum.ROUTE_WITH_SUGGESTION,
+        "escalate": RoutingActionEnum.ESCALATE_TO_HUMAN,
+    }
+    return mapping.get(value, RoutingActionEnum.ESCALATE_TO_HUMAN)
+
+
 def _run_triage_job(job_id: str) -> None:
     """Background runner for async triage jobs."""
     job = TRIAGE_JOBS.get(job_id)
@@ -63,22 +83,22 @@ def _run_triage_job(job_id: str) -> None:
     try:
         job.status = TriageJobStatusEnum.RUNNING
         job.started_at = datetime.utcnow()
-        result = triage_ticket(
+        persisted = triage_ticket_sync(
             subject=job.request.subject,
             description=job.request.description,
-            verbose=job.request.verbose
         )
+        triage_result = persisted["triage_result"]
         job.result = TriageResponse(
-            queue=result.queue,
-            category=result.category,
-            sub_category=result.sub_category,
-            resolution_steps=result.resolution_steps,
-            confidence=result.confidence,
-            sop_reference=result.sop_reference,
-            reasoning=result.reasoning,
-            routing_action=result.routing_action,
-            validation_errors=result.validation_errors,
-            timestamp=datetime.utcnow()
+            queue=str(triage_result["queue"]),
+            category=str(triage_result["category"]),
+            sub_category=str(triage_result["sub_category"]),
+            resolution_steps=[str(step) for step in (triage_result.get("resolution_steps") or [])],
+            confidence=float(triage_result["confidence"]),
+            sop_reference=str(triage_result["sop_reference"]),
+            reasoning=str(triage_result["reasoning"]),
+            routing_action=_map_persisted_routing_to_response(str(triage_result.get("routing_action", ""))),
+            validation_errors=[],
+            timestamp=datetime.utcnow(),
         )
         job.status = TriageJobStatusEnum.COMPLETED
         job.completed_at = datetime.utcnow()
@@ -238,6 +258,62 @@ async def triage_ticket_endpoint(request: TriageRequest):
                 "message": f"Failed to triage ticket: {str(e)}",
                 "timestamp": datetime.utcnow().isoformat()
             }
+        )
+
+
+@router.post(
+    "/chatbot/message",
+    response_model=WebChatResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Process web chatbot message",
+    description="Process floating web chatbot user message/action using the same state machine as Google Chat",
+)
+async def web_chatbot_message_endpoint(request: WebChatRequest):
+    """Route frontend chatbot interactions through the existing conversation engine."""
+    try:
+        response = process_web_chat_event(
+            user_id=request.user_id,
+            session_id=request.session_id,
+            message=request.message,
+            action=request.action,
+        )
+        return WebChatResponse(**response)
+    except Exception as e:
+        logger.error(f"Web chatbot request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "WebChatError",
+                "message": "Unable to process chatbot request right now.",
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
+
+@router.post(
+    "/chatbot/history/clear",
+    response_model=WebChatHistoryClearResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Clear web chatbot history",
+    description="Delete persisted web chatbot history for a user/session",
+)
+async def clear_web_chatbot_history_endpoint(request: WebChatHistoryClearRequest):
+    """Clear web chatbot conversation history records from database."""
+    try:
+        deleted_count = clear_web_chat_history(
+            user_id=request.user_id,
+            session_id=request.session_id,
+        )
+        return WebChatHistoryClearResponse(status="success", deleted_count=deleted_count)
+    except Exception as e:
+        logger.error(f"Web chatbot history clear failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "WebChatHistoryClearError",
+                "message": "Unable to clear chatbot history right now.",
+                "timestamp": datetime.utcnow().isoformat(),
+            },
         )
 
 
@@ -422,6 +498,155 @@ async def get_queues():
         queues=queues,
         count=len(queues)
     )
+
+
+@router.get(
+    "/queues/analytics",
+    response_model=QueueAnalyticsResponse,
+    summary="Get Queue Analytics",
+    description="Queue KPIs and trend data for a selected date range"
+)
+async def get_queue_analytics(
+    start_date: str = Query(..., description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query(..., description="End date in YYYY-MM-DD format"),
+):
+    """Return queue cards and trends for selected date range."""
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "InvalidDateFormat",
+                "message": "start_date and end_date must be in YYYY-MM-DD format",
+            },
+        )
+
+    if end < start:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "InvalidDateRange",
+                "message": "end_date must be greater than or equal to start_date",
+            },
+        )
+
+    db = SessionLocal()
+    try:
+        start_dt = datetime.combine(start, datetime.min.time())
+        end_dt = datetime.combine(end, datetime.max.time())
+
+        labels: list[str] = []
+        cursor: date = start
+        while cursor <= end:
+            labels.append(cursor.strftime("%d %b"))
+            cursor += timedelta(days=1)
+
+        ticket_rows = (
+            db.query(TicketModel)
+            .filter(and_(TicketModel.created_at >= start_dt, TicketModel.created_at <= end_dt))
+            .all()
+        )
+        ticket_ids = [ticket.id for ticket in ticket_rows]
+        total_open = len(ticket_rows)
+
+        triage_rows = []
+        if ticket_ids:
+            triage_rows = (
+                db.query(TriageResultModel)
+                .filter(TriageResultModel.ticket_id.in_(ticket_ids))
+                .all()
+            )
+
+        triage_by_ticket = {}
+        for triage in triage_rows:
+            triage_by_ticket[triage.ticket_id] = triage
+
+        queue_buckets: dict[str, dict] = {}
+
+        for ticket in ticket_rows:
+            triage = triage_by_ticket.get(ticket.id)
+            queue_name = (triage.queue if triage and triage.queue else ticket.raw_group) or "Other Queues"
+            category_name = (triage.category if triage and triage.category else ticket.raw_category) or "General Incident"
+            confidence = float(triage.confidence) if triage and triage.confidence is not None else 0.0
+            day_key = ticket.created_at.date()
+
+            if queue_name not in queue_buckets:
+                queue_buckets[queue_name] = {
+                    "ticket_count": 0,
+                    "confidence_total": 0.0,
+                    "confidence_count": 0,
+                    "categories": {},
+                    "day_counts": {},
+                }
+
+            bucket = queue_buckets[queue_name]
+            bucket["ticket_count"] += 1
+            bucket["confidence_total"] += confidence
+            bucket["confidence_count"] += 1
+            bucket["categories"][category_name] = bucket["categories"].get(category_name, 0) + 1
+            bucket["day_counts"][day_key] = bucket["day_counts"].get(day_key, 0) + 1
+
+        queues: list[QueueAnalyticsItemResponse] = []
+        for queue_name, bucket in queue_buckets.items():
+            avg_confidence = (
+                bucket["confidence_total"] / bucket["confidence_count"]
+                if bucket["confidence_count"] > 0
+                else 0.0
+            )
+            top_category = "General Incident"
+            if bucket["categories"]:
+                top_category = max(bucket["categories"], key=bucket["categories"].get)
+
+            trend_values: list[int] = []
+            trend_cursor = start
+            while trend_cursor <= end:
+                trend_values.append(int(bucket["day_counts"].get(trend_cursor, 0)))
+                trend_cursor += timedelta(days=1)
+
+            queues.append(
+                QueueAnalyticsItemResponse(
+                    name=queue_name,
+                    ticket_count=int(bucket["ticket_count"]),
+                    avg_confidence=max(0.0, min(float(avg_confidence), 1.0)),
+                    top_category=top_category,
+                    trend=trend_values,
+                )
+            )
+
+        queues.sort(key=lambda item: item.ticket_count, reverse=True)
+
+        sla_breached = sum(1 for triage in triage_rows if triage.routing_action == "escalate")
+
+        avg_resolution_hours = (
+            (sum((triage.processing_time_ms or 0) for triage in triage_rows) / 3600000.0) / len(triage_rows)
+            if triage_rows
+            else 0.0
+        )
+
+        return QueueAnalyticsResponse(
+            start_date=start_date,
+            end_date=end_date,
+            labels=labels,
+            total_open=int(total_open),
+            sla_breached=int(sla_breached),
+            avg_resolution_hours=round(float(avg_resolution_hours), 2),
+            queues=queues,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch queue analytics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": "QueueAnalyticsError",
+                "message": f"Failed to retrieve queue analytics: {str(e)}"
+            }
+        )
+    finally:
+        db.close()
 
 
 @router.get(

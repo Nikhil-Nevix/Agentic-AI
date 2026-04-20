@@ -3,91 +3,67 @@ Prompt Templates for Ticket Triaging Agent
 Contains all prompts, instructions, and examples for the LangChain agent.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 
-# System Prompt - Core Instructions
-SYSTEM_PROMPT = """You are an expert IT Service Desk Ticket Triaging Agent for Jade Global Software (AMER Infra BU).
+# Primary conversational prompt used before formal triage starts.
+CONVERSATIONAL_SYSTEM_PROMPT = """You are a specialized customer support assistant.
+Your ONLY job is to help users solve product and service issues by strictly following SOPs.
 
-Your role is to analyze incoming support tickets and provide:
-1. **Queue Assignment** - Which team should handle this ticket
-2. **Category & Sub-Category** - Detailed classification
-3. **Resolution Steps** - Actionable troubleshooting procedure
-4. **Confidence Score** - How certain you are (0.0 to 1.0)
-5. **SOP Reference** - Which procedure applies (if any)
-6. **Reasoning** - Brief explanation of your decision
+RULES:
+- Never answer questions outside of product/service support scope
+- Never make up solutions not found in the SOP
+- Always be concise, warm, and professional
+- If the issue is unclear, ask ONE clarifying question only
+- Never ask for queue or category from the user — handle that internally
 
-## Available Tools
+CONVERSATION PHASE BEHAVIOR:
+- Greeting → Welcome warmly, ask what issue they are facing
+- Issue described → Confirm you understood it, proceed to SOP lookup
+- Unclear message → Ask one clarifying question
+- Out of scope → Politely say you can only help with product/service issues
 
-You have access to two tools:
+CURRENT CONVERSATION CONTEXT:
+{conversation_context}
 
-1. **search_similar_tickets** - Find how similar issues were handled in the past
-   - Use this FIRST to understand patterns
-   - Check queue assignments and resolutions from similar tickets
+USER MESSAGE: {user_message}
 
-2. **search_sop_procedures** - Find official troubleshooting procedures
-   - Use this to get authoritative resolution steps
-   - SOPs cover 160+ common issues across 9 categories
+Respond naturally and helpfully:"""
 
-## Available Queues (Choose ONE)
 
-1. **AMER - STACK Service Desk Group** - General support, password resets, account issues
-2. **AMER - Enterprise Applications** - Business apps (NetSuite, SAP, Salesforce, etc.)
-3. **AMER - Infra & Network** - Network, VPN, connectivity, infrastructure
-4. **AMER - GIS** - Security, permissions, data governance
-5. **AMER - End User Computing** - Laptops, desktops, mobile devices, peripherals
-6. **AMER - DC Infra** - Data center, servers, storage
-7. **AMER - SharePoint** - SharePoint, OneDrive, Teams, collaboration tools
-8. **AMER - Enterprise Unified Communications** - Phone systems, video conferencing
-9. **AMER - Access Management** - IAM, SSO, access provisioning
+# Triage prompt consumed by the ReAct executor in triage_agent.py.
+TRIAGE_AGENT_PROMPT = """You are an expert IT support triage agent.
 
-## Confidence Score Guidelines
+ISSUE DETAILS:
+Subject: {subject}
+Description: {description}
+Additional Context: {context}
 
-- **>= 0.85** (High) - Clear issue, strong SOP match, confident resolution
-- **0.60-0.84** (Medium) - Issue understood, reasonable solution, some uncertainty
-- **< 0.60** (Low) - Ambiguous ticket, missing info, escalate to human
+Your task:
+1. Use available tools to find similar tickets and relevant SOPs
+2. Analyze the issue systematically
+3. Provide structured resolution guidance
 
-## Response Format
+Available tools:
+- similar_ticket_search: Find related past tickets
+- sop_retrieval: Search knowledge base for procedures
 
-You MUST respond with valid JSON in this exact structure:
-
-```json
+CRITICAL: Your Final Answer MUST be valid JSON matching this exact schema:
 {{
-  "queue": "AMER - STACK Service Desk Group",
-  "category": "Access Issues",
-  "sub_category": "Password Reset",
-  "resolution_steps": [
-    "Step 1: Verify user identity",
-    "Step 2: Reset password in Active Directory",
-    "Step 3: Confirm user can login"
-  ],
-  "confidence": 0.92,
-  "sop_reference": "Section 1.1 - Password Reset",
-  "reasoning": "Clear password reset request. Matches SOP 1.1 exactly. High confidence based on similar ticket patterns."
+    "queue": "string",
+    "category": "string",
+    "sub_category": "string",
+    "resolution_steps": ["step1", "step2", "step3"],
+    "confidence": "high|medium|low",
+    "sop_reference": "SOP title or null",
+    "reasoning": "Brief explanation of your analysis"
 }}
-```
 
-## Instructions
+Be specific, concise, and actionable. Use SOP evidence when available and reduce confidence when details are incomplete."""
 
-1. **Read the ticket** carefully (subject + description)
-2. **Use search_similar_tickets** to find patterns (ALWAYS do this first)
-3. **Use search_sop_procedures** if you need official procedures
-4. **Analyze** the information and determine the best queue/category
-5. **Create resolution steps** that are specific, actionable, and numbered
-6. **Assign confidence** based on clarity of issue and quality of match
-7. **Provide reasoning** in 1-2 sentences explaining your decision
-8. **Format your Final Answer** as valid JSON only (see example below)
-
-## Important Notes
-
-- If description is missing, work with subject only (reduce confidence)
-- If no SOP matches, use your knowledge but note "No specific SOP" in reference
-- Resolution steps should be 3-7 steps, specific to this issue
-- Category/sub-category should be descriptive and meaningful
-- ALWAYS use tools before making a decision - don't guess!
-
-Remember: Your goal is to accurately triage tickets so they reach the right team with helpful context."""
+# Backward compatibility alias used elsewhere in legacy flows.
+SYSTEM_PROMPT = TRIAGE_AGENT_PROMPT
 
 
 # Few-Shot Examples
@@ -118,62 +94,6 @@ EXAMPLES = [
             "confidence": 0.95,
             "sop_reference": "Section 1.2 - Account Locked Out",
             "reasoning": "Standard account lockout issue. Clear SOP match (1.2). Similar tickets show 100% resolution with this procedure. High confidence."
-        }
-    },
-    {
-        "ticket": {
-            "subject": "VPN connection timeout",
-            "description": "Remote employee cannot connect to VPN. Error: 'Connection timed out after 30 seconds'"
-        },
-        "reasoning": """
-1. Used search_similar_tickets → Found 8 similar VPN timeout issues
-2. Most routed to Infra & Network team
-3. Used search_sop_procedures → Found SOP 4.10 "VPN Connection Issues"
-4. Network-related, needs infrastructure team
-""",
-        "output": {
-            "queue": "AMER - Infra & Network",
-            "category": "Network",
-            "sub_category": "VPN Issues",
-            "resolution_steps": [
-                "Verify user has active VPN account and correct credentials",
-                "Check if firewall is blocking VPN ports (UDP 500, 4500)",
-                "Test connectivity: ping vpn.jadeglobal.com",
-                "Clear VPN client cache and reinstall if needed",
-                "Check VPN concentrator logs for connection attempts",
-                "If persistent, escalate to network team for firewall review"
-            ],
-            "confidence": 0.82,
-            "sop_reference": "Section 4.10 - VPN Connection Issues",
-            "reasoning": "Network connectivity issue requiring infrastructure team. SOP provides standard steps. Confidence moderate due to potential firewall complexity."
-        }
-    },
-    {
-        "ticket": {
-            "subject": "NetSuite report not loading",
-            "description": ""
-        },
-        "reasoning": """
-1. Used search_similar_tickets → Found 20+ NetSuite-related tickets
-2. All routed to Enterprise Applications team
-3. Description missing, but NetSuite is clearly enterprise application
-4. Reduced confidence due to lack of details
-""",
-        "output": {
-            "queue": "AMER - Enterprise Applications",
-            "category": "Software",
-            "sub_category": "NetSuite",
-            "resolution_steps": [
-                "Contact user to get specific report name and error details",
-                "Check user's NetSuite role and permissions for report access",
-                "Verify report exists and is not archived",
-                "Test report with admin account to isolate permission issue",
-                "Clear browser cache and test in incognito mode",
-                "If still failing, check NetSuite system status and recent changes"
-            ],
-            "confidence": 0.68,
-            "sop_reference": "No specific SOP - NetSuite issues require app team expertise",
-            "reasoning": "NetSuite issue goes to Enterprise Apps team. No description reduces confidence. Need user input for specific troubleshooting."
         }
     }
 ]
@@ -252,7 +172,7 @@ def format_examples_for_prompt() -> str:
     Returns:
         Formatted examples string
     """
-    output = "## Examples\n\nHere are examples of good ticket triaging:\n\n"
+    output = "## Example\n\nUse this as a style reference:\n\n"
     
     for i, example in enumerate(EXAMPLES, 1):
         output += f"### Example {i}\n\n"
@@ -262,7 +182,7 @@ def format_examples_for_prompt() -> str:
         if example['ticket']['description']:
             output += f"- Description: {example['ticket']['description']}\n"
         
-        output += f"\n**Your Analysis:**\n{example['reasoning']}\n"
+        output += f"\n**Analysis:**\n{example['reasoning']}\n"
         output += f"\n**Your Response:**\n```json\n"
         
         import json
@@ -272,7 +192,17 @@ def format_examples_for_prompt() -> str:
     return output
 
 
-def create_agent_prompt(subject: str, description: str) -> str:
+def create_conversational_prompt(conversation_context: str, user_message: str) -> str:
+    """Build the conversational assistant prompt for Google Chat responses."""
+    safe_context = (conversation_context or "No prior context").strip()
+    safe_message = (user_message or "").strip()
+    return CONVERSATIONAL_SYSTEM_PROMPT.format(
+        conversation_context=safe_context,
+        user_message=safe_message,
+    )
+
+
+def create_agent_prompt(subject: str, description: str, context: Optional[str] = None) -> str:
     """
     Create complete prompt for the agent.
     
@@ -283,30 +213,15 @@ def create_agent_prompt(subject: str, description: str) -> str:
     Returns:
         Formatted prompt string
     """
-    prompt = f"""{SYSTEM_PROMPT}
+    safe_subject = subject.strip() if subject else "(No subject provided)"
+    safe_description = description if description else "(No description provided)"
+    safe_context = context.strip() if context else "No additional context"
 
-{format_examples_for_prompt()}
-
----
-
-## YOUR TASK
-
-Now analyze this new ticket:
-
-**Subject:** {subject}
-**Description:** {description if description else "(No description provided)"}
-
-**Instructions:**
-1. Use search_similar_tickets to find patterns
-2. Use search_sop_procedures to find official procedures (if applicable)
-3. Analyze the information carefully
-4. When you have all the information needed, provide your Final Answer as JSON only
-
-Remember: Your Final Answer must be ONLY the JSON object with no additional text or explanation.
-
-Begin your analysis now."""
-
-    return prompt
+    return TRIAGE_AGENT_PROMPT.format(
+        subject=safe_subject,
+        description=safe_description,
+        context=safe_context,
+    )
 
 
 def get_reflection_prompt(agent_response: Dict[str, Any], ticket: Dict[str, str]) -> str:
@@ -384,11 +299,14 @@ PROMPT_VERSION = "1.0.0"
 LAST_UPDATED = datetime.now().strftime("%Y-%m-%d")
 
 __all__ = [
+    'CONVERSATIONAL_SYSTEM_PROMPT',
+    'TRIAGE_AGENT_PROMPT',
     'SYSTEM_PROMPT',
     'EXAMPLES',
     'OUTPUT_SCHEMA',
     'VALIDATION_RULES',
     'ERROR_MESSAGES',
+    'create_conversational_prompt',
     'create_agent_prompt',
     'format_examples_for_prompt',
     'get_reflection_prompt',

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
+import FloatingChatWidget from './components/FloatingChatWidget'
 const Dashboard = lazy(() => import('./components/Dashboard'))
 const WelcomePage = lazy(() => import('./pages/WelcomePage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -13,12 +14,20 @@ import { getHealth, getStats, loginUser, signupUser } from './api/client'
 import { cn } from './lib/utils'
 import type { LoginCredentials, SidebarRoute, TriageResult as TriageResultData } from './types'
 
+const JADE_DOMAIN = 'jadeglobal.com'
+
+const isJadeUserEmail = (email: string): boolean => {
+  const normalized = email.trim().toLowerCase()
+  const domain = normalized.split('@')[1] || ''
+  return domain === JADE_DOMAIN
+}
+
 const routeTitle: Record<SidebarRoute, string> = {
   '/welcome': 'Welcome to Service Desk Triage',
   '/login': 'Sign in to Service Desk Triage',
   '/signup': 'Create your Service Desk account',
   '/dashboard': 'Executive Dashboard',
-  '/triage': 'Ticket Triage Workbench',
+  '/triage': 'Triage & AI Solution Provider',
   '/tickets': 'Ticket Operations Console',
   '/queues': 'Queue Management',
 }
@@ -35,10 +44,12 @@ const toSidebarRoute = (pathname: string): SidebarRoute => {
 
 const AppShell = ({
   isAuthenticated,
+  isJadeUser,
   onLogout,
   children,
 }: {
   isAuthenticated: boolean
+  isJadeUser: boolean
   onLogout: () => void
   children: React.ReactNode
 }) => {
@@ -57,6 +68,7 @@ const AppShell = ({
     .slice(0, 2) || 'SD'
 
   const activeRoute = useMemo(() => toSidebarRoute(location.pathname), [location.pathname])
+  const effectiveRoute = !isJadeUser && activeRoute === '/dashboard' ? '/triage' : activeRoute
 
   useEffect(() => {
     const loadShellData = async () => {
@@ -84,9 +96,10 @@ const AppShell = ({
     <div className={cn('min-h-screen bg-slate-50 dark:bg-slate-900')}>
       {isAuthenticated && (
         <Sidebar
-          activeRoute={activeRoute}
+          activeRoute={effectiveRoute}
           onNavigate={handleNavigate}
           queueCount={5}
+          showDashboard={isJadeUser}
         />
       )}
       <div className={cn('min-h-screen transition-all duration-200', isAuthenticated ? 'ml-64' : 'ml-0')}>
@@ -107,9 +120,9 @@ const AppShell = ({
         <header className="border-b border-slate-200 bg-white px-6 py-5 dark:border-slate-700 dark:bg-slate-900">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
-                {routeTitle[activeRoute]}
-              </h1>
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+                  {routeTitle[effectiveRoute]}
+                </h1>
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 AI-Powered Service Intelligence
               </p>
@@ -122,6 +135,7 @@ const AppShell = ({
           </div>
         </header>
         <main className="p-6">{children}</main>
+        <FloatingChatWidget userId={signedInEmail} visible={isAuthenticated && !isJadeUser} />
       </div>
     </div>
   )
@@ -143,11 +157,14 @@ const RequireAuth = ({
 function App() {
   const navigate = useNavigate()
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isJadeUser, setIsJadeUser] = useState(false)
   const [isAuthLoading, setIsAuthLoading] = useState(false)
   const [triageHistory, setTriageHistory] = useState<Record<string, unknown>[]>([])
 
   useEffect(() => {
     const authState = window.localStorage.getItem('jade-auth')
+    const storedDomainFlag = window.localStorage.getItem('jade-is-company-user')
+    setIsJadeUser(storedDomainFlag === 'true')
     if (authState === 'true') {
       setIsAuthenticated(true)
     }
@@ -168,11 +185,14 @@ function App() {
       if (!user?.email) {
         throw new Error('Invalid login response from server.')
       }
+      const companyUser = isJadeUserEmail(user.email)
       setIsAuthenticated(true)
+      setIsJadeUser(companyUser)
       window.localStorage.setItem('jade-auth', 'true')
       window.localStorage.setItem('jade-signup-email', user.email)
       window.localStorage.setItem('jade-user-role', user.role || 'Service Desk User')
-      navigate('/dashboard')
+      window.localStorage.setItem('jade-is-company-user', companyUser ? 'true' : 'false')
+      navigate(companyUser ? '/dashboard' : '/triage')
     } catch (error) {
       const message = (error as { response?: { data?: { detail?: { message?: string } } } })?.response?.data?.detail?.message
       throw new Error(message || 'Unable to sign in. Please try again.')
@@ -192,11 +212,14 @@ function App() {
       if (!user?.email) {
         throw new Error('Invalid signup response from server.')
       }
+      const companyUser = isJadeUserEmail(user.email)
       setIsAuthenticated(true)
+      setIsJadeUser(companyUser)
       window.localStorage.setItem('jade-auth', 'true')
       window.localStorage.setItem('jade-signup-email', user.email)
       window.localStorage.setItem('jade-user-role', user.role || 'Service Desk User')
-      navigate('/dashboard')
+      window.localStorage.setItem('jade-is-company-user', companyUser ? 'true' : 'false')
+      navigate(companyUser ? '/dashboard' : '/triage')
     } catch (error) {
       const message = (error as { response?: { data?: { detail?: { message?: string } } } })?.response?.data?.detail?.message
       throw new Error(message || 'Unable to sign up. Please try again.')
@@ -207,9 +230,11 @@ function App() {
 
   const handleLogout = () => {
     setIsAuthenticated(false)
+    setIsJadeUser(false)
     window.localStorage.removeItem('jade-auth')
     window.localStorage.removeItem('jade-signup-email')
     window.localStorage.removeItem('jade-user-role')
+    window.localStorage.removeItem('jade-is-company-user')
   }
 
   const handleTriageSaved = (savedResult: TriageResultData) => {
@@ -251,9 +276,13 @@ function App() {
           path="/dashboard"
           element={
             <RequireAuth isAuthenticated={isAuthenticated}>
-              <AppShell isAuthenticated={isAuthenticated} onLogout={handleLogout}>
-                <Dashboard />
-              </AppShell>
+              {isJadeUser ? (
+                <AppShell isAuthenticated={isAuthenticated} isJadeUser={isJadeUser} onLogout={handleLogout}>
+                  <Dashboard />
+                </AppShell>
+              ) : (
+                <Navigate to="/triage" replace />
+              )}
             </RequireAuth>
           }
         />
@@ -262,7 +291,7 @@ function App() {
           path="/triage"
           element={
             <RequireAuth isAuthenticated={isAuthenticated}>
-              <AppShell isAuthenticated={isAuthenticated} onLogout={handleLogout}>
+              <AppShell isAuthenticated={isAuthenticated} isJadeUser={isJadeUser} onLogout={handleLogout}>
                 <TriagePage onTriageSaved={handleTriageSaved} />
               </AppShell>
             </RequireAuth>
@@ -273,7 +302,7 @@ function App() {
           path="/tickets"
           element={
             <RequireAuth isAuthenticated={isAuthenticated}>
-              <AppShell isAuthenticated={isAuthenticated} onLogout={handleLogout}>
+              <AppShell isAuthenticated={isAuthenticated} isJadeUser={isJadeUser} onLogout={handleLogout}>
                 <TicketsPage />
               </AppShell>
             </RequireAuth>
@@ -284,15 +313,15 @@ function App() {
           path="/queues"
           element={
             <RequireAuth isAuthenticated={isAuthenticated}>
-              <AppShell isAuthenticated={isAuthenticated} onLogout={handleLogout}>
+              <AppShell isAuthenticated={isAuthenticated} isJadeUser={isJadeUser} onLogout={handleLogout}>
                 <QueuesPage onViewQueue={() => navigate('/tickets')} />
               </AppShell>
             </RequireAuth>
           }
         />
 
-        <Route path="/" element={<Navigate to={isAuthenticated ? '/dashboard' : '/welcome'} replace />} />
-        <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/welcome'} replace />} />
+        <Route path="/" element={<Navigate to={isAuthenticated ? (isJadeUser ? '/dashboard' : '/triage') : '/welcome'} replace />} />
+        <Route path="*" element={<Navigate to={isAuthenticated ? (isJadeUser ? '/dashboard' : '/triage') : '/welcome'} replace />} />
       </Routes>
     </Suspense>
   )

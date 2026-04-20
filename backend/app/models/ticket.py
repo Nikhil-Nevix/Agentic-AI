@@ -119,7 +119,7 @@ class AuditLog(Base):
 
 class SOPChunk(Base):
     """
-    Parsed SOP procedure chunks from Common.pdf.
+    Parsed SOP procedure chunks from SOP source PDFs.
     Each chunk represents one searchable SOP procedure.
     """
     __tablename__ = "sop_chunks"

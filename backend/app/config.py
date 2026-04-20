@@ -111,6 +111,23 @@ class Settings(BaseSettings):
     
     # === CORS ===
     cors_origins: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:3000,http://192.168.10.200:3000,http://localhost:2026,http://127.0.0.1:2026,http://192.168.10.200:2026"
+
+    # === GOOGLE CHAT ===
+    google_chat_webhook_enabled: bool = True
+    google_chat_bot_name: str = "Triage Assistant"
+    google_chat_integration_mode: Literal["one_way", "two_way"] = "one_way"
+    google_chat_incoming_webhook_url: Optional[str] = None
+    google_chat_notify_on_triage: bool = False
+    google_chat_inline_triage_timeout_seconds: int = 20
+
+    # === FRESHSERVICE ===
+    freshservice_enabled: bool = False
+    freshservice_webhook_only_mode: bool = False
+    freshservice_domain: str = ""
+    freshservice_api_key: str = ""
+    freshservice_requester_email: str = "support-bot@yourcompany.com"
+    freshservice_webhook_secret: Optional[str] = None
+    freshservice_queue_group_map: Optional[str] = None
     
     @property
     def cors_origins_list(self) -> List[str]:

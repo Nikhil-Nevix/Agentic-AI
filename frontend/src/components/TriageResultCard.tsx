@@ -34,6 +34,7 @@ export const TriageResultCard = ({
 }: TriageResultCardProps) => {
   const [showAllSteps, setShowAllSteps] = useState(false)
   const [showReasoning, setShowReasoning] = useState(true)
+  const [showAISolution, setShowAISolution] = useState(false)
   const routingDecision = result.routing ?? getRoutingFromScore(result.confidence)
   const visibleSteps = showAllSteps ? result.resolution_steps : result.resolution_steps.slice(0, 3)
   const hasMoreSteps = result.resolution_steps.length > 3
@@ -93,7 +94,7 @@ export const TriageResultCard = ({
         <div className="mb-3 flex items-center justify-between">
           <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
             <ListChecks className="h-4 w-4 text-brand-jade" />
-            Resolution Steps
+            SOP Solution
           </p>
           {hasMoreSteps && (
             <button
@@ -124,43 +125,48 @@ export const TriageResultCard = ({
         </ol>
       </section>
 
-      <section className="mb-5 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-        <button
-          type="button"
-          onClick={() => setShowReasoning((prev) => !prev)}
-          className="mb-3 inline-flex items-center gap-1 text-sm font-semibold text-slate-900 transition-all duration-200 hover:text-brand-accent dark:text-slate-100"
-        >
-          Agent reasoning:
-          {showReasoning ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </button>
-        {showReasoning && (
-          <blockquote className="border-l-2 border-slate-300 pl-3 text-sm italic text-slate-500 dark:border-slate-600 dark:text-slate-400">
-            {result.reasoning}
-          </blockquote>
-        )}
-      </section>
+      {showAISolution && (
+        <section className="mb-5 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+          <button
+            type="button"
+            onClick={() => setShowReasoning((prev) => !prev)}
+            className="mb-3 inline-flex items-center gap-1 text-sm font-semibold text-slate-900 transition-all duration-200 hover:text-brand-accent dark:text-slate-100"
+          >
+            AI solution:
+            {showReasoning ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+          {showReasoning && (
+            <blockquote className="border-l-2 border-slate-300 pl-3 text-sm italic text-slate-500 dark:border-slate-600 dark:text-slate-400">
+              {result.reasoning}
+            </blockquote>
+          )}
+        </section>
+      )}
 
       <footer className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onClick={onAccept}
+          onClick={() => {
+            setShowAISolution(true)
+            onOverride()
+          }}
           className="inline-flex items-center justify-center rounded-lg bg-brand-jade px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-brand-jade-light"
         >
-          Accept & Close
+          Get AI Solution
         </button>
         <button
           type="button"
-          onClick={onOverride}
+          onClick={onAccept}
           className="inline-flex items-center justify-center rounded-lg border border-brand-accent px-4 py-2 text-sm font-semibold text-brand-accent transition-all duration-200 hover:bg-blue-50 dark:hover:bg-brand-accent/15"
         >
-          Override Queue
+          Auto Resolve
         </button>
         <button
           type="button"
           onClick={onEscalate}
           className="inline-flex items-center justify-center rounded-lg border border-danger-red px-4 py-2 text-sm font-semibold text-danger-red transition-all duration-200 hover:bg-red-50 dark:hover:bg-danger-red/15"
         >
-          Escalate
+          Escalate to Human
         </button>
       </footer>
     </article>

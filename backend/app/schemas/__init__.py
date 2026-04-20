@@ -13,6 +13,8 @@ from app.schemas.triage import (
     ErrorResponse,
     QueuesResponse,
     StatsResponse,
+    QueueAnalyticsItemResponse,
+    QueueAnalyticsResponse,
     RoutingActionEnum,
     TriageJobStatusEnum
 )
@@ -34,6 +36,8 @@ __all__ = [
     'ErrorResponse',
     'QueuesResponse',
     'StatsResponse',
+    'QueueAnalyticsItemResponse',
+    'QueueAnalyticsResponse',
     'RoutingActionEnum',
     'TriageJobStatusEnum',
     'SignupRequest',

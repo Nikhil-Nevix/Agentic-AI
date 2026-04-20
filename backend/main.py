@@ -11,7 +11,7 @@ from loguru import logger
 import time
 
 from app.config import settings
-from app.routers import triage_router, auth_router
+from app.routers import triage_router, auth_router, google_chat_webhook_router, freshservice_webhook_router
 from app.db.session import init_db
 
 
@@ -138,6 +138,16 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Include routers
 app.include_router(triage_router)
 app.include_router(auth_router)
+app.include_router(
+    google_chat_webhook_router,
+    prefix="/api/v1/google-chat",
+    tags=["google-chat"],
+)
+app.include_router(
+    freshservice_webhook_router,
+    prefix="/api/v1/freshservice",
+    tags=["freshservice"],
+)
 
 
 # Root endpoint
